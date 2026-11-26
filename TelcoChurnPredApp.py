@@ -53,7 +53,6 @@ def positive_class_shap_values(shap_values):
     return values
 
 
-@st.cache_resource(show_spinner=False)
 def make_explanation(model, transformed_data):
     classifier = get_classifier(model)
     if hasattr(classifier, "coef_"):
