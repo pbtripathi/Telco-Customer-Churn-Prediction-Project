@@ -67,7 +67,16 @@ def positive_class_shap_values(shap_values):
         if hasattr(shap_values, "__getitem__"):
             return shap_values[..., positive_index]
         return values[..., positive_index]
-    return values
+    return shap_values
+
+
+def select_top_shap_features(shap_values, feature_count=20):
+    values = np.asarray(getattr(shap_values, "values", shap_values))
+    if values.ndim != 2:
+        raise ValueError("Expected SHAP values with samples and features.")
+
+    top_indices = np.argsort(np.abs(values).mean(axis=0))[-feature_count:][::-1]
+    return shap_values[:, top_indices]
 
 
 def make_explanation(model, transformed_data):
@@ -331,11 +340,12 @@ with tab2:
     )
     shap_values = make_explanation(rf_model, transformed_sample_df)
     positive_shap = positive_class_shap_values(shap_values)
+    top_shap = select_top_shap_features(positive_shap)
 
     fig = plt.figure()
     shap.plots.beeswarm(
-        positive_shap,
-        max_display=15,
+        top_shap,
+        max_display=20,
         show=False,
     )
     st.pyplot(fig)
@@ -343,7 +353,7 @@ with tab2:
 
     st.subheader("SHAP Feature Importance")
     fig = plt.figure()
-    shap.plots.bar(positive_shap, max_display=15, show=False)
+    shap.plots.bar(top_shap, max_display=20, show=False)
     st.pyplot(fig)
     plt.close(fig)
 
