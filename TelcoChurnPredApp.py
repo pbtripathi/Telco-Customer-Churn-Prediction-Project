@@ -5,6 +5,14 @@ import pandas as pd
 import shap
 import streamlit as st
 from joblib import load
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+from sklearn.model_selection import train_test_split
 
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
@@ -18,14 +26,23 @@ st.set_page_config(
 )
 
 
-@st.cache_resource
-def load_pipeline(filename: str):
+def get_model_path(filename: str) -> pathlib.Path:
     path = MODELS_DIR / filename
     if not path.is_file():
         path = BASE_DIR / filename
     if not path.is_file():
         raise FileNotFoundError(f"Required model file was not found: {path}")
-    return load(path)
+    return path
+
+
+@st.cache_resource
+def load_pipeline(filename: str):
+    return load(get_model_path(filename))
+
+
+def get_file_signature(path: pathlib.Path):
+    stat = path.stat()
+    return (str(path), stat.st_mtime_ns, stat.st_size)
 
 
 def get_classifier(pipeline):
@@ -72,10 +89,59 @@ def get_feature_importance(feature_names, feature_importance):
     )
 
 
+@st.cache_data(show_spinner="Calculating model performance...")
+def calculate_model_performance(dataset_signature, model_signatures, _models):
+    data = pd.read_csv(dataset_signature[0])
+    data["TotalCharges"] = pd.to_numeric(data["TotalCharges"], errors="coerce")
+    data = data.dropna(subset=["TotalCharges"])
+
+    target = (
+        data["Churn"]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .map({"yes": 1, "no": 0})
+    )
+    valid = target.notna()
+    features = data.drop(columns=["Churn", "CustomerID"]).loc[valid]
+    target = target.loc[valid].astype(int)
+    _, X_test, _, y_test = train_test_split(
+        features,
+        target,
+        test_size=0.2,
+        random_state=42,
+        stratify=target,
+    )
+
+    results = []
+    for model_name, *_ in model_signatures:
+        model = _models[model_name]
+        predictions = model.predict(X_test)
+        probabilities = model.predict_proba(X_test)[:, 1]
+        results.append(
+            {
+                "Model": model_name,
+                "Accuracy": accuracy_score(y_test, predictions),
+                "Precision": precision_score(
+                    y_test, predictions, zero_division=0
+                ),
+                "Recall": recall_score(y_test, predictions, zero_division=0),
+                "F1 Score": f1_score(y_test, predictions, zero_division=0),
+                "ROC AUC": roc_auc_score(y_test, probabilities),
+            }
+        )
+
+    return pd.DataFrame(results).set_index("Model")
+
+
+model_files = {
+    "Logistic Regression": "logistic_model.pkl",
+    "Random Forest": "rf_model.pkl",
+    "XGBoost": "xgb_model.pkl",
+}
 models = {
-    "Logistic Regression": load_pipeline("logistic_model.pkl"),
-    "Random Forest": load_pipeline("rf_model.pkl"),
-    "XGBoost": load_pipeline("xgb_model.pkl"),
+    model_name: load_pipeline(filename)
+    for model_name, filename in model_files.items()
 }
 
 tab1, tab2 = st.tabs(["Prediction", "Model Insights"])
@@ -196,6 +262,27 @@ with tab1:
             plt.close(fig)
 
 with tab2:
+    st.subheader("Model Performance Comparison")
+    st.caption(
+        "Scores use the same stratified 20% holdout set used to train the models."
+    )
+    dataset_signature = get_file_signature(
+        BASE_DIR / "Telecom-Customer-Churn_Dataset.csv"
+    )
+    model_signatures = tuple(
+        (model_name, *get_file_signature(get_model_path(filename)))
+        for model_name, filename in model_files.items()
+    )
+    performance = calculate_model_performance(
+        dataset_signature,
+        model_signatures,
+        models,
+    )
+    st.dataframe(
+        performance.style.format("{:.3f}"),
+        width="stretch",
+    )
+
     st.subheader("Random Forest Feature Importance")
     rf_model = models["Random Forest"]
     rf_preprocessor = get_preprocessor(rf_model)
