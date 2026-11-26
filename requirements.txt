@@ -6,3 +6,4 @@ shap
 joblib
 scikit-learn
 xgboost
+nbconvert[webpdf]

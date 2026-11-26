@@ -11,6 +11,13 @@ BASE_DIR = pathlib.Path(__file__).resolve().parent
 MODELS_DIR = BASE_DIR / "models"
 
 
+st.set_page_config(
+    page_title="Telco Customer Churn Prediction",
+    page_icon="📊",
+    layout="wide",
+)
+
+
 @st.cache_resource
 def load_pipeline(filename: str):
     path = MODELS_DIR / filename
@@ -46,11 +53,24 @@ def positive_class_shap_values(shap_values):
     return values
 
 
+@st.cache_resource(show_spinner=False)
 def make_explanation(model, transformed_data):
     classifier = get_classifier(model)
     if hasattr(classifier, "coef_"):
         return shap.LinearExplainer(classifier, transformed_data)(transformed_data)
     return shap.Explainer(classifier)(transformed_data)
+
+
+@st.cache_data(show_spinner=False)
+def get_feature_importance(feature_names, feature_importance):
+    return (
+        pd.DataFrame(
+            {"feature": feature_names, "importance": feature_importance}
+        )
+        .sort_values("importance", ascending=False)
+        .head(15)
+        .reset_index(drop=True)
+    )
 
 
 models = {
@@ -107,8 +127,8 @@ with tab1:
         [
             "Electronic check",
             "Mailed check",
-            "Bank transfer (automatic)",
-            "Credit card (automatic)",
+            "Bank transfer",
+            "Credit card",
         ],
     )
     monthly = st.number_input("Monthly Charges", min_value=0.0, max_value=200.0, value=70.0)
@@ -184,19 +204,25 @@ with tab2:
     feature_names = rf_preprocessor.get_feature_names_out()
     feature_importance = rf_classifier.feature_importances_
 
-    feat_imp = (
-        pd.DataFrame(
-            {"feature": feature_names, "importance": feature_importance}
-        )
-        .sort_values("importance", ascending=False)
-        .head(15)
+    feat_imp = get_feature_importance(
+        tuple(feature_names),
+        tuple(feature_importance),
     )
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.barh(feat_imp["feature"], feat_imp["importance"])
+    fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
+    colors = plt.cm.Blues(np.linspace(0.45, 0.85, len(feat_imp)))
+    ax.barh(
+        feat_imp["feature"],
+        feat_imp["importance"],
+        color=colors,
+        edgecolor="none",
+    )
     ax.invert_yaxis()
     ax.set_title("Top Drivers of Customer Churn")
-    st.pyplot(fig)
+    ax.set_xlabel("Feature importance")
+    ax.set_ylabel("Transformed feature")
+    ax.grid(axis="x", alpha=0.25)
+    st.pyplot(fig, clear_figure=True)
     plt.close(fig)
 
     st.subheader("SHAP Summary Plot")
